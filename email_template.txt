@@ -1,0 +1,25 @@
+SUBJECT: Application — interest in opportunities at {{COMPANY_NAME}}
+
+Dear Hiring Manager,
+
+I am writing to express my interest in opportunities at {{COMPANY_NAME}}. I have 1.5 years of hands-on experience in frontend development using React.js, TypeScript, and JavaScript, along with practical exposure to DevOps and cloud technologies including AWS, Docker, Kubernetes, and CI/CD pipelines.
+
+In my current role, I develop and maintain scalable web applications, build reusable UI components, and integrate APIs to improve application performance and user experience. I have also worked on cloud infrastructure setup, deployment automation, containerization, and modern DevOps workflows.
+
+Additionally, I have experience collaborating with development teams, improving deployment workflows, and working on scalable architectures that support efficient and reliable application development and operations.
+
+Apart from my professional experience, I am currently building AnimioUI, a reusable UI component library, and actively contributing to open-source projects on GitHub. These experiences have strengthened my technical expertise, collaboration, and problem-solving abilities.
+
+You can view my work here:
+Portfolio: https://nehalingole.in/
+
+I have attached my resume for your review and would welcome the opportunity to discuss how I can contribute to your team at {{COMPANY_NAME}}.
+
+Thank you for your time and consideration. I look forward to hearing from you.
+
+--
+
+Thanks and Regards,
+Nehal Ingole
+Portfolio
+Contact :- 7397966719
