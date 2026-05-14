@@ -17,6 +17,12 @@ Dry run (no sending):
 
 By default attaches Nehal_Ingole_7397966719.pdf from the same folder as this script. Override with
   --attach path/to/resume.pdf   or send without file using   --no-attach
+
+By default only the first 50 sheet rows (in file order) are processed. Use --no-limit for the full list
+  or e.g. --limit 100 to change the cap.
+
+After a row's email(s) send successfully, writes Done to the status column (column D by default). Use
+  --no-mark-done to skip updating the workbook. --done-column E to pick another column letter.
 """
 
 from __future__ import annotations
@@ -32,6 +38,8 @@ from pathlib import Path
 
 import pandas as pd
 from dotenv import load_dotenv
+from openpyxl import load_workbook
+from openpyxl.utils import column_index_from_string, get_column_letter
 
 load_dotenv()
 
@@ -54,6 +62,15 @@ COMPANY_ALIASES = {
     "business",
     "firm",
     "client",
+}
+STATUS_ALIASES = {
+    "status",
+    "sent",
+    "state",
+    "remark",
+    "remarks",
+    "done",
+    "email status",
 }
 
 # Basic check: skip "NO email id", N/A, non-address text
@@ -82,6 +99,48 @@ def is_valid_recipient_email(raw: str) -> bool:
     if "@" not in s:
         return False
     return bool(_SIMPLE_EMAIL.match(s))
+
+
+def parse_recipient_emails(raw: str) -> list[str]:
+    """Split comma/semicolon-separated addresses; return unique valid emails in order."""
+    s = str(raw).strip()
+    if not s or s.lower() == "nan":
+        return []
+    low = s.lower()
+    if "no email" in low or low in {"n/a", "na", "-", "none", "tbd"}:
+        return []
+    parts = re.split(r"[,;\n]+", s)
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in parts:
+        e = p.strip()
+        if not is_valid_recipient_email(e):
+            continue
+        k = e.lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(e)
+    return out
+
+
+def resolve_done_column_letter(df: pd.DataFrame, override: str | None) -> str:
+    """Excel column letter where we write Done (default D, or a named status column if found)."""
+    if override:
+        return override.strip().upper()
+    col = pick_column(df, STATUS_ALIASES)
+    if col is not None:
+        loc = df.columns.get_loc(col)
+        if isinstance(loc, int):
+            return get_column_letter(loc + 1)
+    return "D"
+
+
+def write_done_to_sheet(excel_path: Path, row_1based: int, col_letter: str, value: str = "Done") -> None:
+    col_idx = column_index_from_string(col_letter)
+    wb = load_workbook(excel_path)
+    ws = wb.active
+    ws.cell(row=row_1based, column=col_idx, value=value)
+    wb.save(excel_path)
 
 
 def load_contacts(path: Path, header_row: int | None) -> tuple[pd.DataFrame, int]:
@@ -162,6 +221,18 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print actions without sending")
     parser.add_argument("--delay", type=float, default=2.0, help="Seconds between sends (rate limit)")
     parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        metavar="N",
+        help="Process at most the first N rows from the sheet in order (default: 50). Ignored with --no-limit.",
+    )
+    parser.add_argument(
+        "--no-limit",
+        action="store_true",
+        help="Process all rows in the sheet (ignore --limit).",
+    )
+    parser.add_argument(
         "--header-row",
         type=int,
         default=None,
@@ -179,6 +250,17 @@ def main() -> None:
         "--no-attach",
         action="store_true",
         help="Send email without any attachment",
+    )
+    parser.add_argument(
+        "--done-column",
+        default=None,
+        metavar="LETTER",
+        help="Excel column letter to write Done after successful sends (default: D, or first matching Status/Sent column)",
+    )
+    parser.add_argument(
+        "--no-mark-done",
+        action="store_true",
+        help="Do not update the Excel file after sends",
     )
     args = parser.parse_args()
 
@@ -223,6 +305,23 @@ def main() -> None:
             f"Use one of: {sorted(COMPANY_ALIASES)}"
         )
 
+    total_rows = len(df)
+    if not args.no_limit:
+        if args.limit < 1:
+            raise SystemExit("--limit must be at least 1, or use --no-limit for the full sheet.")
+        df = df.head(args.limit)
+        print(
+            f"Row cap: first {len(df)} of {total_rows} data row(s) (--limit {args.limit}). "
+            "Use --no-limit to process everyone."
+        )
+    else:
+        print(f"Row cap: disabled (--no-limit); processing all {len(df)} data row(s).")
+
+    done_col_letter = resolve_done_column_letter(df, args.done_column)
+    mark_done = not args.no_mark_done
+    if mark_done:
+        print(f"Will write 'Done' to column {done_col_letter} after each fully successful row (use --no-mark-done to disable).")
+
     if not args.dry_run:
         if not sender or not app_password:
             raise SystemExit("Set GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env (see .env.example).")
@@ -235,14 +334,16 @@ def main() -> None:
     sent = 0
     for pos, (idx, row) in enumerate(df.iterrows()):
         company = str(row[company_col]).strip()
-        to_addr = str(row[email_col]).strip()
-        excel_row_guess = header_used + 2 + pos  # 1-based sheet row for first data row when index is 0,1,2,…
-
+        to_raw = str(row[email_col]).strip()
+        excel_row_1based = header_used + 2 + pos
         if not company or company.lower() == "nan":
-            print(f"Sheet ~row {excel_row_guess}: skip — empty company name")
+            print(f"Sheet ~row {excel_row_1based}: skip — empty company name")
             continue
-        if not is_valid_recipient_email(to_addr):
-            print(f"Sheet ~row {excel_row_guess}: skip — invalid or missing email ({to_addr!r}) for {company!r}")
+        addresses = parse_recipient_emails(to_raw)
+        if not addresses:
+            print(
+                f"Sheet ~row {excel_row_1based}: skip — no valid email in ({to_raw!r}) for {company!r}"
+            )
             continue
 
         subj = env_subject or subject_tpl
@@ -250,21 +351,41 @@ def main() -> None:
         body = render(body_tpl, company)
 
         if args.dry_run:
-            print(f"[dry-run] To: {to_addr} | Company: {company}")
+            print(f"[dry-run] Recipients: {', '.join(addresses)} | Company: {company}")
             print(f"  Subject: {subj}")
             if attach_path is not None:
                 print(f"  Attachment: {attach_path.name} ({attach_path})")
             else:
                 print("  Attachment: (none)")
+            if mark_done:
+                print(f"  Would mark row {excel_row_1based} column {done_col_letter} = Done")
             print("  --- body preview ---")
             print(body[:500] + ("..." if len(body) > 500 else ""))
             print()
         else:
-            send_gmail(sender, app_password, to_addr, subj, body, attach_path)
-            sent += 1
-            print(f"Sent to {to_addr} ({company})")
-            if args.delay > 0:
-                time.sleep(args.delay)
+            row_ok = True
+            for addr in addresses:
+                try:
+                    send_gmail(sender, app_password, addr, subj, body, attach_path)
+                    sent += 1
+                    print(f"Sent to {addr} ({company})")
+                    if args.delay > 0:
+                        time.sleep(args.delay)
+                except (smtplib.SMTPException, OSError) as exc:
+                    row_ok = False
+                    print(f"Sheet row {excel_row_1based}: failed sending to {addr!r}: {exc}")
+                    break
+            if row_ok and mark_done:
+                try:
+                    write_done_to_sheet(args.excel.resolve(), excel_row_1based, done_col_letter)
+                    print(f"  Marked sheet row {excel_row_1based} column {done_col_letter} = Done")
+                except PermissionError:
+                    print(
+                        f"  Could not save Excel (is {args.excel.name} open in Excel?). "
+                        "Close it and re-run this row or mark Done manually."
+                    )
+                except Exception as exc:
+                    print(f"  Could not update Excel row {excel_row_1based}: {exc}")
 
     if args.dry_run:
         print("Dry run complete; no messages were sent.")

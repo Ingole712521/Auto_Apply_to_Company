@@ -8,7 +8,7 @@ In my current role, I develop and maintain scalable web applications, build reus
 
 Additionally, I have experience collaborating with development teams, improving deployment workflows, and working on scalable architectures that support efficient and reliable application development and operations.
 
-Apart from my professional experience, I am currently building AnimioUI, a reusable UI component library, and actively contributing to open-source projects on GitHub. These experiences have strengthened my technical expertise, collaboration, and problem-solving abilities.
+Apart from my professional experience, I am currently building AnimioUI, a reusable UI component library, and actively contributing to open-source projects on GitHub. These experiences have strengthened my technical expertise, collaboration, and problem-solving abilities. You can explore the library here: https://www.animioui.in/
 
 You can view my work here:
 Portfolio: https://nehalingole.in/
